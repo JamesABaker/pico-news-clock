@@ -21,6 +21,7 @@ current_headline_index = 0  # Which headline we're currently displaying
 last_weather_fetch = 0  # Last time we fetched weather data
 cached_weather = None  # Store weather information
 
+
 def get_time():
     time = utime.ticks_ms()  # Get current time in milliseconds
     # Convert to human readable format
@@ -47,48 +48,52 @@ def load_wifi_json():
         print(f"Error reading wifi.json: {e}")
         return None
 
+
 def get_weather():
     """Fetches weather data for London from Open-Meteo"""
     global last_weather_fetch, cached_weather
-    
+
     current_time = utime.time()
     # Only fetch if we have no data or it's been 10+ minutes
-    if cached_weather is None or (current_time - last_weather_fetch) > 600:  # 600 seconds = 10 minutes
+    if (
+        cached_weather is None or (current_time - last_weather_fetch) > 600
+    ):  # 600 seconds = 10 minutes
         try:
             print("Fetching weather data...")
             # TODO smarter coordinates
             latitude = "52.048326"
             longitude = "-0.024102"
             url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,wind_speed_10m,weather_code&timezone=Europe/London"
-            
+
             response = urequests.get(url)
             weather_data = response.json()
             response.close()
-            
+
             # Extract current weather
             current = weather_data.get("current", {})
             temperature = current.get("temperature_2m", "?")
             wind_speed = current.get("wind_speed_10m", "?")
             weather_code = current.get("weather_code", 0)
-            
+
             # Create weather description based on WMO weather code
             weather_desc = get_weather_description(weather_code)
-            
+
             # Cache the data
             cached_weather = {
                 "temp": temperature,
                 "wind": wind_speed,
-                "desc": weather_desc
+                "desc": weather_desc,
             }
             last_weather_fetch = current_time
-            
+
             print(f"Weather: {temperature}°C, {wind_speed} km/h, {weather_desc}")
         except Exception as e:
             print(f"Weather API error: {e}")
             if cached_weather is None:  # Only use placeholder if we have no data
                 cached_weather = {"temp": "?", "wind": "?", "desc": "Unknown"}
-    
+
     return cached_weather
+
 
 def get_weather_description(code):
     """Convert WMO weather code to simple description"""
@@ -305,8 +310,6 @@ def run():
 
                 print("Updating display...")
 
-                
-
                 # Now lets loop 10 times before the next API call
                 for _ in range(10):
                     # Reset display
@@ -321,7 +324,7 @@ def run():
                     # Get current time (syncs every 5 min)
                     current_time = get_time()
                     display.text(f"{current_time}", 120, 80, scale=7)
-                    
+
                     # Add weather information at the bottom
                     weather = get_weather()
                     weather_text = f"{weather['temp']}°C\n{weather['desc']}"
@@ -334,7 +337,9 @@ def run():
                     print("Waiting for next minute...")
                     utime.sleep(60)
                     print("Minute passed, updating...")
-                print("10 minute cycle completed, fetching new headlines and resyncing time...")
+                print(
+                    "10 minute cycle completed, fetching new headlines and resyncing time..."
+                )
     else:
         print("Failed to load WiFi configuration. Exiting...")
 
