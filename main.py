@@ -1,9 +1,12 @@
 from picographics import PicoGraphics, DISPLAY_INKY_PACK
 import utime
+
 # Lets connect to the internert and g
 import ujson
 import network
 import urequests
+from machine import RTC
+import utime
 
 # Global variables
 # Initialize the display - specify a compatible pen type
@@ -13,11 +16,13 @@ display = PicoGraphics(display=DISPLAY_INKY_PACK)
 display.set_pen(0)  # Set pen to black
 # Pause for a second
 
+
 def get_time():
-    time= utime.ticks_ms()  # Get current time in milliseconds
+    time = utime.ticks_ms()  # Get current time in milliseconds
     # Convert to human readable format
     time = f"{time} ms"
     return time
+
 
 def reset_e_inky():
     # Reset the e-ink display
@@ -27,15 +32,17 @@ def reset_e_inky():
     display.set_pen(0)  # Set pen to black
     utime.sleep(1)  # Pause for a second
 
+
 def load_wifi_json():
     try:
-        with open('wifi.json', 'r') as file:
+        with open("wifi.json", "r") as file:
             wifi_data = ujson.load(file)
             print(wifi_data)
             return wifi_data
     except OSError as e:
         print(f"Error reading wifi.json: {e}")
         return None
+
 
 def connect_to_wifi(ssid, password):
     wlan = network.WLAN(network.STA_IF)  # Create a station interface
@@ -54,12 +61,13 @@ def connect_to_wifi(ssid, password):
     print("Connected to WiFi")
     return True
 
+
 def get_international_news():
     try:
         # Use BBC's RSS feed - lightweight and no API key needed
         response = urequests.get("http://feeds.bbci.co.uk/news/world/rss.xml")
         content = response.text
-        
+
         # Simple parsing to extract the first headline
         # Find the first title tag after an item tag
         item_start = content.find("<item>")
@@ -67,78 +75,118 @@ def get_international_news():
             title_start = content.find("<title>", item_start) + 7
             title_end = content.find("</title>", title_start)
             headline = content[title_start:title_end]
-            
+
             # Clean up any HTML/XML entities
-            headline = headline.replace("&quot;", "\"")
+            headline = headline.replace("&quot;", '"')
             headline = headline.replace("&amp;", "&")
             headline = headline.replace("&#39;", "'")
             headline = headline.replace("&lt;", "<")
             headline = headline.replace("<![", "")
             headline = headline.replace("CDATA[", "")
             headline = headline.replace("]]>", "")
-            
+
             return headline
         else:
             return "No headlines found"
-    
+
     except Exception as e:
         print(f"Error getting news: {e}")
         return "Failed to fetch news"
 
-def display_headlines():
-    reset_e_inky()
-    display.text("Today's Top Story:", 10, 10, scale=2)
-    
-    # Add parentheses to call the function
-    headline = get_international_news()
-    y_position = 45  # Start position for the headline
-    
+
+def display_headlines_with_wordwrap(headline, x_pos=10, y_start=10, max_width=140):
     # Word wrap logic for the headline
     words = headline.split()
     line = ""
-    
+    y_position = y_start
+
     for word in words:
         # Test if adding this word would make the line too long
         test_line = line + " " + word if line else word
-        if len(test_line) > 30:  # Character limit per line
+        if (
+            len(test_line) > max_width // (6)  # Approximate characters that fit in max_width
+        ):  # Approximate characters that fit in max_width
             # Current line is full, print it and start a new line
-            display.text(line, 10, y_position, scale=1)
+            display.text(line, x_pos, y_position, scale=2)
             y_position += 15  # Smaller line spacing
             line = word  # Start new line with current word
         else:
             line = test_line
-    
+
     # Print the last line of the headline
     if line:
-        display.text(line, 10, y_position, scale=1)
+        display.text(line, x_pos, y_position, scale=2)
+
+    return y_position + 15  # Return the next available y position
+
+
+# Add this function to sync with NTP servers
+def get_time():
+    try:
+        # WorldTimeAPI - provides time for London specifically
+        response = urequests.get("http://worldtimeapi.org/api/timezone/Europe/London")
+        time_data = response.json()
+        response.close()
+        
+        # Extract time details
+        datetime_str = time_data["datetime"]  # Format: "2025-06-06T12:34:56.789123+01:00"
+        
+        # Parse the datetime string
+        date_part = datetime_str.split("T")[0]  # "2025-06-06"
+        time_part = datetime_str.split("T")[1].split(".")[0]  # "12:34:56"
+        
+        year, month, day = [int(x) for x in date_part.split("-")]
+        hour, minute, second = [int(x) for x in time_part.split(":")]
+        
+        # Set the RTC
+        rtc = RTC()
+        weekday = time_data.get("day_of_week", 0)  # API provides day of week (0 is Monday)
+        rtc.datetime((year, month, day, weekday, hour, minute, second, 0))
+        
+        print(f"Time synced via API: {year}-{month}-{day} {hour}:{minute}:{second}")
+        return str(f"{hour}:{minute}")
+        
+    except Exception as e:
+        print(f"API time sync failed: {e}")
+        return False
     
-    display.update()
+
 # Cronological run of main logic starts here
 
-def run():
-    #reset_e_inky()
-    #display.text(f"Boot successful in: {get_time()}", 10, 20, scale=2)  # Draw text at position (10, 20) with scale 2
-    # Update the display
-    #display.update()
-    # Pause for a second
-    #utime.sleep(1)
 
+# Update the run function to use the new layout
+def run():
+
+
+    print("Starting main logic...")
     # Load WiFi configuration from JSON file
     wifi_config = load_wifi_json()
     if wifi_config:
-        ssid = wifi_config.get('ssid', 'Unknown SSID')
-        password = wifi_config.get('password', 'No Password')
-        display.text(f"SSID: {ssid}", 10, 60, scale=2)
-        display.text(f"Password: {password}", 10, 100, scale=2)
-        # Update the display again
-        display.update()
-        # Pause for a second    
-        utime.sleep(1)
-    # Connect to WiFi using the loaded configuration
-    if connect_to_wifi(ssid, password):
-        #reset_e_inky()
-        #display.text("Connected to WiFi", 10, 60, scale=2)
-        #display.update()
+        ssid = wifi_config.get("ssid", "Unknown SSID")
+        password = wifi_config.get("password", "No Password")
+        print(f"Loaded WiFi configuration: SSID={ssid}.\nEntering time loop...")
+        # Connect to WiFi using the loaded configuration
+        if connect_to_wifi(ssid, password):
+            # Lets run the main logic every minute
+            while True:
+                print("Next iteration of time loop...")
+                # Sync time if possible
+                # Reset display and create layout with clock and headline
+                reset_e_inky()
+                #display.text("Top\nStory:", 10, 10, scale=3)
+                headline = get_international_news()
+                display_headlines_with_wordwrap(
+                    headline, x_pos=5, y_start=5, max_width=160
+                )
 
-        display_headlines()
+                # Now this will show the real time
+                current_time = get_time()
+                display.text(f"{current_time}", 150, 80, scale=7)
+                display.update()
+                utime.sleep(60)
+                print("Main logic completed, waiting for next iteration...")
+    else:
+        print("Failed to load WiFi configuration. Exiting...")
+
+
 run()  # Call the run function to execute the main logic
