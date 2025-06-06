@@ -16,6 +16,8 @@ display = PicoGraphics(display=DISPLAY_INKY_PACK)
 display.set_pen(0)  # Set pen to black
 # Pause for a second
 
+last_collected_time = None  # Variable to store the last collected time
+time_fetch_fail_since_last_sync = 0
 
 def get_time():
     time = utime.ticks_ms()  # Get current time in milliseconds
@@ -122,6 +124,8 @@ def display_headlines_with_wordwrap(headline, x_pos=10, y_start=10, max_width=14
 
 # Add this function to sync with NTP servers
 def get_time():
+    global last_collected_time, time_fetch_fail_since_last_sync
+    
     try:
         # WorldTimeAPI - provides time for London specifically
         response = urequests.get("http://worldtimeapi.org/api/timezone/Europe/London")
@@ -129,26 +133,64 @@ def get_time():
         response.close()
         
         # Extract time details
-        datetime_str = time_data["datetime"]  # Format: "2025-06-06T12:34:56.789123+01:00"
-        
-        # Parse the datetime string
-        date_part = datetime_str.split("T")[0]  # "2025-06-06"
-        time_part = datetime_str.split("T")[1].split(".")[0]  # "12:34:56"
+        datetime_str = time_data["datetime"]
+        date_part = datetime_str.split("T")[0]
+        time_part = datetime_str.split("T")[1].split(".")[0]
         
         year, month, day = [int(x) for x in date_part.split("-")]
         hour, minute, second = [int(x) for x in time_part.split(":")]
         
+        # Convert API weekday (0=Sunday) to MicroPython RTC weekday (0=Monday)
+        api_weekday = time_data.get("day_of_week", 0)
+        mp_weekday = 6 if api_weekday == 0 else api_weekday - 1
+        
         # Set the RTC
         rtc = RTC()
-        weekday = time_data.get("day_of_week", 0)  # API provides day of week (0 is Monday)
-        rtc.datetime((year, month, day, weekday, hour, minute, second, 0))
+        rtc.datetime((year, month, day, mp_weekday, hour, minute, second, 0))
+        
+        # Save this successful time data
+        last_collected_time = (year, month, day, mp_weekday, hour, minute, second)
+        # Reset the failure counter
+        time_fetch_fail_since_last_sync = 0
         
         print(f"Time synced via API: {year}-{month}-{day} {hour}:{minute}:{second}")
-        return str(f"{hour}:{minute}")
+        return f"{hour:02d}:{minute:02d}"
         
     except Exception as e:
         print(f"API time sync failed: {e}")
-        return False
+        time_fetch_fail_since_last_sync += 1
+        
+        if last_collected_time:
+            # We have a previously saved time, use it with adjustment
+            year, month, day, weekday, hour, minute, second = last_collected_time
+            
+            # Add one minute for each failed attempt (adjust as needed)
+            additional_minutes = time_fetch_fail_since_last_sync
+            
+            # Simple time calculation (not handling month/year boundaries)
+            minute += additional_minutes
+            hour += minute // 60
+            minute %= 60
+            day += hour // 24
+            hour %= 24
+            
+            # Try to update RTC with our calculated time
+            try:
+                rtc = RTC()
+                rtc.datetime((year, month, day, weekday, hour, minute, second, 0))
+                print(f"Using calculated time: {hour:02d}:{minute:02d} (+{additional_minutes}min)")
+                return f"{hour:02d}:{minute:02d}"
+            except Exception as rtc_err:
+                print(f"RTC update failed: {rtc_err}")
+        
+        # If all else fails, try to read current RTC
+        try:
+            rtc = RTC()
+            dt = rtc.datetime()
+            h, m = dt[4], dt[5]
+            return f"{h:02d}:{m:02d}"
+        except:
+            return "??:??"
     
 
 # Cronological run of main logic starts here
@@ -181,7 +223,7 @@ def run():
 
                 # Now this will show the real time
                 current_time = get_time()
-                display.text(f"{current_time}", 150, 80, scale=7)
+                display.text(f"{current_time}", 105, 80, scale=7)
                 display.update()
                 utime.sleep(60)
                 print("Main logic completed, waiting for next iteration...")
